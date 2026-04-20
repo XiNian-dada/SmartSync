@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: SmartSync
+  profiles:
+    active: dev
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-aliases-package: com.leeinx.smartsync.module.*.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+smartsync:
+  jwt:
+    secret: ${SMARTSYNC_JWT_SECRET:change-me-to-32+-bytes-in-prod-xxxxxxxxxxxxxxxxxxxx}
+    expire-hours: 2
+    header: Authorization
+    prefix: "Bearer "
+  rfid:
+    hmac-key: ${SMARTSYNC_RFID_HMAC_KEY:change-me-rfid-hmac-key-xxxxxxxxxxxxxx}
+
+logging:
+  level:
+    com.leeinx.smartsync: DEBUG
+    org.springframework.security: INFO
