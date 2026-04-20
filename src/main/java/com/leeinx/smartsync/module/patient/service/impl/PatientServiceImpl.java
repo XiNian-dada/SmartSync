@@ -18,14 +18,19 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
- * 患者业务 Service 实现。
+ * 患者档案 Service 实现。
  *
- * <h2>{@link BeanUtils#copyProperties(Object, Object)}</h2>
- * Spring 的工具方法，按字段名复制 source → target 的 getter/setter。
- * 适合"DTO → Entity""Entity → VO"这类字段大量重合的场景。
+ * <h2>唯一性校验</h2>
+ * 两个字段有业务唯一性：
+ * <ul>
+ *   <li>{@code idCardNo} —— 一个人只能有一份档案</li>
+ *   <li>{@code rfidUuid} —— 一个手环只能绑一个患者</li>
+ * </ul>
+ * 虽然 DB 层有唯一索引兜底，但业务层主动查询 + 抛业务异常能给前端友好提示（而非 SQL 异常）。
  *
- * <h2>关于 RFID 大小写</h2>
- * 写入时统一大写（手环生产规范），查询时也转大写，避免前后端大小写不一致导致查不到。
+ * <h2>fetchByRfid 的变更</h2>
+ * 早期版本用 {@code status=1（在院）} 过滤。现在 patient 表不再持有"在院"状态——
+ * RFID 是否绑定即代表手环是否在用，直接查 {@code rfid_uuid=X} 就够了。
  */
 @Service
 @RequiredArgsConstructor
@@ -35,14 +40,14 @@ public class PatientServiceImpl implements PatientService {
     private final RfidUtil rfidUtil;
 
     /**
-     * 新建患者。
+     * 新建患者档案。
      *
      * <h3>步骤</h3>
      * <ol>
-     *   <li>DTO 字段拷贝到 Entity。</li>
-     *   <li>status 默认为 1（在院）。</li>
-     *   <li>若 rfidUuid 非空，检查唯一性。</li>
-     *   <li>insert。</li>
+     *   <li>DTO → Entity 拷贝</li>
+     *   <li>校验 idCardNo 唯一</li>
+     *   <li>校验 rfidUuid 唯一（若传了）</li>
+     *   <li>insert</li>
      * </ol>
      */
     @Override
@@ -50,46 +55,35 @@ public class PatientServiceImpl implements PatientService {
     public Long create(PatientSaveDTO dto) {
         Patient p = new Patient();
         BeanUtils.copyProperties(dto, p);
-        if (p.getStatus() == null) p.setStatus(1);
+        checkIdCardConflict(p.getIdCardNo(), null);
         checkRfidConflict(p.getRfidUuid(), null);
         patientMapper.insert(p);
         return p.getId();
     }
 
     /**
-     * 更新患者。
-     *
-     * <h3>注意点</h3>
-     * <ul>
-     *   <li>先 {@link #getById(Long)} 确认患者存在——否则 updateById 静默失败（影响 0 行没有异常）。</li>
-     *   <li>RFID 唯一性校验需排除当前患者自己（{@code excludeId = id}），否则自己改自己会冲突。</li>
-     *   <li>{@code BeanUtils.copyProperties(dto, exist)} 会覆盖所有非 null 字段——包括 null 值！
-     *       所以传 {@code rfidUuid=null} 可以实现"出院置空"的语义。</li>
-     * </ul>
+     * 更新患者档案。
+     * <p>两个唯一字段都要"排除自己"做冲突检查。</p>
      */
     @Override
     @Transactional
     public void update(Long id, PatientSaveDTO dto) {
         Patient exist = getById(id);
+        checkIdCardConflict(dto.getIdCardNo(), id);
         checkRfidConflict(dto.getRfidUuid(), id);
         BeanUtils.copyProperties(dto, exist);
-        // copyProperties 可能覆盖掉 id（若 DTO 有同名字段会，但 PatientSaveDTO 没有 id 字段，实际不会改——兜底设一下更安全）
         exist.setId(id);
         patientMapper.updateById(exist);
     }
 
-    /**
-     * 逻辑删除。
-     */
+    /** 逻辑删除前先校验存在性。 */
     @Override
     public void delete(Long id) {
         getById(id);
         patientMapper.deleteById(id);
     }
 
-    /**
-     * 按 id 查，失败抛 NOT_FOUND。
-     */
+    /** 按主键查，失败抛 NOT_FOUND。 */
     @Override
     public Patient getById(Long id) {
         Patient p = patientMapper.selectById(id);
@@ -102,45 +96,42 @@ public class PatientServiceImpl implements PatientService {
     /**
      * 分页查询。
      *
-     * <h3>LambdaQueryWrapper 中的 {@code .and(w -> ...)}</h3>
-     * 生成 SQL 里一个加括号的子条件 {@code AND (name LIKE ? OR medical_record_no LIKE ? OR rfid_uuid = ?)}，
-     * 避免 OR 污染外层的 {@code status} 等条件。
+     * <h3>keyword 多字段匹配规则</h3>
+     * <ul>
+     *   <li>{@code name} 用 LIKE 模糊匹配（患者姓名可能只记一部分）</li>
+     *   <li>{@code idCardNo / phone / rfidUuid} 用 = 精确匹配（身份证号片段意义不大）</li>
+     * </ul>
+     * 用 {@code .and(w -> ...)} 包裹避免 OR 污染外层条件。
      */
     @Override
-    public IPage<Patient> page(long current, long size, String keyword, Integer status) {
+    public IPage<Patient> page(long current, long size, String keyword) {
         Page<Patient> page = Page.of(current, size);
         LambdaQueryWrapper<Patient> q = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
             q.and(w -> w.like(Patient::getName, keyword)
-                    .or().like(Patient::getMedicalRecordNo, keyword)
+                    .or().eq(Patient::getIdCardNo, keyword)
+                    .or().eq(Patient::getPhone, keyword)
                     .or().eq(Patient::getRfidUuid, keyword.toUpperCase()));
-        }
-        if (status != null) {
-            q.eq(Patient::getStatus, status);
         }
         q.orderByDesc(Patient::getId);
         return patientMapper.selectPage(page, q);
     }
 
     /**
-     * 终端拉取患者：双因子鉴权的<b>第二因子</b>（第一因子 JWT 已在 Filter 生效）。
+     * 终端拉取患者：双因子的第二因子（JWT 已在 Filter 验证）。
      *
      * <h3>链路</h3>
      * <ol>
-     *   <li>{@link RfidUtil#verify(String)} 校验 13 位格式 + HMAC 校验位。</li>
-     *   <li>用 12 位 UUID 查"在院"患者（status=1）。</li>
-     *   <li>Entity → VO，只返回必要字段。</li>
+     *   <li>{@link RfidUtil#verify(String)} 校验 HMAC 校验位，返回 12 位 UUID</li>
+     *   <li>按 UUID 查患者（无 status 过滤）</li>
+     *   <li>命中则 Entity → VO 下发</li>
      * </ol>
-     *
-     * @param rfid13 终端上传的 13 位 RFID
-     * @return 患者 VO
      */
     @Override
     public PatientVO fetchByRfid(String rfid13) {
         String uuid = rfidUtil.verify(rfid13);
         Patient p = patientMapper.selectOne(new LambdaQueryWrapper<Patient>()
-                .eq(Patient::getRfidUuid, uuid)
-                .eq(Patient::getStatus, 1));
+                .eq(Patient::getRfidUuid, uuid));
         if (p == null) {
             throw new BusinessException(ResultCode.RFID_NOT_BOUND);
         }
@@ -150,22 +141,30 @@ public class PatientServiceImpl implements PatientService {
     }
 
     /**
-     * 校验 RFID 唯一性：是否有其他患者占用了同一 UUID。
+     * 检查身份证号唯一性。更新时排除自己；新建时 {@code excludeId=null}。
      *
-     * <h3>为什么仅靠数据库 UNIQUE 索引不够</h3>
-     * DB 唯一约束会报 {@code SQLIntegrityConstraintViolationException}，但 Spring 映射成 {@code DuplicateKeyException}，
-     * 错误信息不友好。这里主动查询 + 抛业务异常，让前端拿到 {@code CONFLICT} 业务码和中文提示。
+     * @throws BusinessException 身份证号已被其他患者占用
+     */
+    private void checkIdCardConflict(String idCardNo, Long excludeId) {
+        if (!StringUtils.hasText(idCardNo)) return;
+        Patient hit = patientMapper.selectOne(new LambdaQueryWrapper<Patient>()
+                .eq(Patient::getIdCardNo, idCardNo));
+        if (hit != null && (excludeId == null || !hit.getId().equals(excludeId))) {
+            throw new BusinessException(ResultCode.PATIENT_ID_CARD_EXISTS);
+        }
+    }
+
+    /**
+     * 检查 RFID 手环唯一性。
      *
-     * @param rfidUuid  待校验的 UUID（null 或空跳过）
-     * @param excludeId 更新时排除自己的 id；新建时传 null
+     * @throws BusinessException 手环已被其他患者绑定
      */
     private void checkRfidConflict(String rfidUuid, Long excludeId) {
         if (!StringUtils.hasText(rfidUuid)) return;
-        LambdaQueryWrapper<Patient> q = new LambdaQueryWrapper<Patient>()
-                .eq(Patient::getRfidUuid, rfidUuid.toUpperCase());
-        Patient hit = patientMapper.selectOne(q);
+        Patient hit = patientMapper.selectOne(new LambdaQueryWrapper<Patient>()
+                .eq(Patient::getRfidUuid, rfidUuid.toUpperCase()));
         if (hit != null && (excludeId == null || !hit.getId().equals(excludeId))) {
-            throw new BusinessException(ResultCode.CONFLICT, "该 RFID 已绑定其他患者");
+            throw new BusinessException(ResultCode.PATIENT_RFID_CONFLICT);
         }
     }
 }

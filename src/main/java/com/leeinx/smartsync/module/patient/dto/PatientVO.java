@@ -3,41 +3,42 @@ package com.leeinx.smartsync.module.patient.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
-import java.time.LocalDateTime;
-
 /**
  * 下发给终端的患者信息视图。
  *
- * <h2>为什么不直接返回 {@link com.leeinx.smartsync.module.patient.entity.Patient}</h2>
+ * <h2>和 Entity 的差异</h2>
  * <ul>
- *   <li>Entity 有 {@code deleted}、{@code createdAt} 等技术字段，终端不关心。</li>
- *   <li>VO 按"终端需要什么"精确定义字段，未来加内部字段不会影响下发结构。</li>
- *   <li>避免 Lazy Loading 等 ORM 副作用（如果切 JPA 时更关键）。</li>
+ *   <li>不含技术字段：{@code createdAt / updatedAt / deleted}</li>
+ *   <li>其它字段与 Entity 一致，便于终端直接展示</li>
  * </ul>
+ *
+ * <h2>敏感字段脱敏 TODO</h2>
+ * 当前 {@code idCardNo / phone / insuranceNo / emergencyContactPhone} 原样下发。
+ * 生产环境应在 Service → VO 转换时做脱敏（如 {@code 138****8000}）。
  */
 @Data
 @Schema(description = "患者信息（下发终端）")
 public class PatientVO {
     /** 患者主键 */
     private Long id;
-    /** 12 位手环 UUID */
+    /** 当前手环 UUID */
     private String rfidUuid;
+    /** 身份证号 */
+    private String idCardNo;
+    /** 医保卡号 */
+    private String insuranceNo;
+    /** 本人手机号 */
+    private String phone;
     /** 姓名 */
     private String name;
-    /** 性别 */
+    /** 性别：1 男 / 2 女 */
     private Integer gender;
     /** 年龄 */
     private Integer age;
-    /** 病历号 */
-    private String medicalRecordNo;
-    /** 病区 */
-    private String ward;
-    /** 床号 */
-    private String bedNo;
-    /** 诊断摘要 */
-    private String diagnosis;
-    /** 入院时间 */
-    private LocalDateTime admissionAt;
-    /** 状态：0 出院 / 1 在院 */
-    private Integer status;
+    /** 病史 */
+    private String medicalHistory;
+    /** 紧急联系人姓名 */
+    private String emergencyContactName;
+    /** 紧急联系人电话 */
+    private String emergencyContactPhone;
 }

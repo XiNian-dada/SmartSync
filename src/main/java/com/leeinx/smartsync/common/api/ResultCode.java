@@ -17,11 +17,8 @@ import lombok.Getter;
  *   <li><b>200/4xx/500</b>：与 HTTP 标准状态码含义对齐，处理通用场景。</li>
  *   <li><b>4100 段</b>：终端 / 鉴权相关业务错误。</li>
  *   <li><b>4200 段</b>：RFID 相关业务错误。</li>
- *   <li>后续可继续按业务模块划分区段（例如 4300 段预留给药品管理等新模块）。</li>
+ *   <li><b>4300 段</b>：患者相关业务错误。</li>
  * </ul>
- *
- * <h2>Lombok 注解 {@code @Getter}</h2>
- * 自动为所有字段生成 getter，本类不需要 setter（枚举值不可变），所以没用 {@code @Data}。
  */
 @Getter
 public enum ResultCode {
@@ -52,8 +49,13 @@ public enum ResultCode {
     RFID_INVALID_FORMAT(4201, "RFID 格式非法"),
     /** RFID：最后一位校验位与服务器算出的不一致，可能被篡改 */
     RFID_CHECKSUM_FAIL(4202, "RFID 校验位不匹配"),
-    /** RFID：校验通过但数据库里没有对应的在院患者 */
-    RFID_NOT_BOUND(4203, "RFID 未绑定在院患者");
+    /** RFID：校验通过但数据库里没有对应的患者（手环未绑定 / 已回收） */
+    RFID_NOT_BOUND(4203, "RFID 未绑定任何患者"),
+
+    /** 患者：身份证号已存在（同一个人档案不能重复） */
+    PATIENT_ID_CARD_EXISTS(4301, "该身份证号已存在患者档案"),
+    /** 患者：RFID 手环已绑定其他患者 */
+    PATIENT_RFID_CONFLICT(4302, "该 RFID 已绑定其他患者");
 
     /** 业务状态码（对应 Result.code 字段） */
     private final Integer code;
@@ -61,12 +63,6 @@ public enum ResultCode {
     /** 对应的默认错误消息（对应 Result.message 字段） */
     private final String message;
 
-    /**
-     * 枚举构造器（Java 枚举的构造器默认就是 private，不能从外部 new）。
-     *
-     * @param code    业务状态码
-     * @param message 默认提示文案
-     */
     ResultCode(Integer code, String message) {
         this.code = code;
         this.message = message;
