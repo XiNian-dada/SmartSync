@@ -32,6 +32,11 @@ springdoc:
     path: /v3/api-docs
 
 smartsync:
+  datasource:
+    fallback-sqlite:
+      enabled: true
+      path: ${SMARTSYNC_SQLITE_PATH:${user.dir}/data/smartsync.sqlite}
+      mysql-probe-timeout-ms: 1500
   jwt:
     secret: ${SMARTSYNC_JWT_SECRET:change-me-to-32+-bytes-in-prod-xxxxxxxxxxxxxxxxxxxx}
     expire-hours: 2

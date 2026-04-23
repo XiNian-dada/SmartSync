@@ -45,6 +45,7 @@ build/
 logs/
 *.log
 *.log.*
+data/
 
 ### Local-only overrides ###
 application-local.yaml
