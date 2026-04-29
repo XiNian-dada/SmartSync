@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
 public class Terminal implements Serializable {
 
     /** 主键。 */
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     /** 终端编码，业务唯一。 */

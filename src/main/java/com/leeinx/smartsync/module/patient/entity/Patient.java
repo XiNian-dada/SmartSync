@@ -20,7 +20,7 @@ import java.time.LocalDateTime;
 public class Patient implements Serializable {
 
     /** 主键。 */
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     /** 当前绑定手环的 12 位 UUID，空表示未绑定。 */
